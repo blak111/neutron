@@ -1025,6 +1025,9 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
             # clean up network owned ports
             for port in ports:
+                LOG.debug("BUG/1197627: delete_network is now deleting port '%s'" % port['id'])
+                import time
+                time.sleep(10)
                 self._delete_port(context, port['id'])
 
             # clean up subnets
@@ -1416,6 +1419,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             self._delete_port(context, id)
 
     def _delete_port(self, context, id):
+        LOG.debug("BUG/1197627: _delete_port has been called on port '%s'" % id)
         port = self._get_port(context, id)
 
         allocated_qry = context.session.query(

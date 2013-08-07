@@ -181,6 +181,7 @@ class DhcpRpcCallbackMixin(object):
         ports = plugin.get_ports(context, filters=filters)
 
         if ports:
+            LOG.debug("BUG/1197627: release_dhcp_port is now deleting port '%s'" % ports[0]['id'])
             plugin.delete_port(context, ports[0]['id'])
 
     def release_port_fixed_ip(self, context, **kwargs):
