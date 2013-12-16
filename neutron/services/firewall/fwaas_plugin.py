@@ -232,6 +232,11 @@ class FirewallPlugin(firewall_db.Firewall_db_mixin):
         fw = super(FirewallPlugin, self).create_firewall(context, firewall)
         fw_with_rules = (
             self._make_firewall_dict_with_rules(context, fw['id']))
+        servicecontext_id = fw.get('service_context_id')
+        if servicecontext_id:
+            service_context = self.get_service_context(context,
+                                                       servicecontext_id)
+            fw_with_rules.update(service_context)
         self.agent_rpc.create_firewall(context, fw_with_rules)
         return fw
 

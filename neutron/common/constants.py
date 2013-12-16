@@ -109,3 +109,6 @@ PROTO_NUM_UDP = 17
 # Neighbor Solicitation (135),
 # Neighbor Advertisement (136)
 ICMPV6_ALLOWED_TYPES = [130, 131, 132, 134, 135, 136]
+
+# Allowed list of resource types for service insertion
+SI_ALLOWED_RESOURCE_TYPES = ["routers", "networks", "ports", "subnets"]

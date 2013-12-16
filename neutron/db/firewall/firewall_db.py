@@ -22,9 +22,11 @@ from sqlalchemy.ext.orderinglist import ordering_list
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
+from neutron.api.v2 import attributes
 from neutron.db import db_base_plugin_v2 as base_db
 from neutron.db import model_base
 from neutron.db import models_v2
+from neutron.db import service_context as svc_ctxt_db
 from neutron.extensions import firewall
 from neutron import manager
 from neutron.openstack.common import log as logging
@@ -68,6 +70,16 @@ class Firewall(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
     firewall_policy_id = sa.Column(sa.String(36),
                                    sa.ForeignKey('firewall_policies.id'),
                                    nullable=True)
+    service_context_id = sa.Column(sa.String(36),
+                                   sa.ForeignKey('service_context.id',
+                                                 ondelete='CASCADE'),
+                                   nullable=True,
+                                   unique=True)
+    service_context = orm.relationship(svc_ctxt_db.ServiceContext,
+                                       backref=orm.backref("firewall",
+                                                           lazy='joined',
+                                                           uselist=False,
+                                                           cascade='delete'))
 
 
 class FirewallPolicy(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
@@ -85,7 +97,8 @@ class FirewallPolicy(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
     firewalls = orm.relationship(Firewall, backref='firewall_policies')
 
 
-class Firewall_db_mixin(firewall.FirewallPluginBase, base_db.CommonDbMixin):
+class Firewall_db_mixin(firewall.FirewallPluginBase, base_db.CommonDbMixin,
+                        svc_ctxt_db.ServiceContextMixin):
     """Mixin class for Firewall DB implementation."""
 
     @property
@@ -119,6 +132,18 @@ class Firewall_db_mixin(firewall.FirewallPluginBase, base_db.CommonDbMixin):
                'admin_state_up': fw['admin_state_up'],
                'status': fw['status'],
                'firewall_policy_id': fw['firewall_policy_id']}
+        if fw.get('service_context_id'):
+            svc_ctxt = fw['service_context']
+            svc_ctxt_dict = {}
+            for (c_name, c_id) in [('routers', 'router_id'),
+                                   ('networks', 'network_id'),
+                                   ('subnets', 'subnet_id'),
+                                   ('ports', 'port_id')]:
+                db_entries = svc_ctxt[c_name] or []
+                svc_ctxt_dict[c_name] = []
+                for db_entry in db_entries:
+                    svc_ctxt_dict[c_name].append(db_entry.get(c_id))
+            res['service_context'] = svc_ctxt_dict
         return self._fields(res, fields)
 
     def _make_firewall_policy_dict(self, firewall_policy, fields=None):
@@ -230,10 +255,24 @@ class Firewall_db_mixin(firewall.FirewallPluginBase, base_db.CommonDbMixin):
         else:
             return '%d:%d' % (min_port, max_port)
 
+    def _process_service_context_for_fw(self, context, firewall):
+        LOG.debug(_("_process_service_context_for_fw() called"))
+        fw_data = firewall['firewall']
+        if not attributes.is_attr_set(fw_data.get('service_context')):
+            return
+        scontext = fw_data['service_context']
+        if not scontext:
+            return
+        if attributes.is_attr_set(fw_data.get('tenant_id')):
+            scontext['tenant_id'] = fw_data['tenant_id']
+        return self._process_service_context(context, scontext)
+
     def create_firewall(self, context, firewall):
         LOG.debug(_("create_firewall() called"))
         fw = firewall['firewall']
         tenant_id = self._get_tenant_id_for_create(context, fw)
+        scontext_db = self._process_service_context_for_fw(context, firewall)
+        service_context_id = scontext_db.id if scontext_db else None
         with context.session.begin(subtransactions=True):
             firewall_db = Firewall(id=uuidutils.generate_uuid(),
                                    tenant_id=tenant_id,
@@ -241,6 +280,8 @@ class Firewall_db_mixin(firewall.FirewallPluginBase, base_db.CommonDbMixin):
                                    description=fw['description'],
                                    firewall_policy_id=
                                    fw['firewall_policy_id'],
+                                   service_context_id=
+                                   service_context_id,
                                    admin_state_up=fw['admin_state_up'],
                                    status=const.PENDING_CREATE)
             context.session.add(firewall_db)
@@ -262,6 +303,9 @@ class Firewall_db_mixin(firewall.FirewallPluginBase, base_db.CommonDbMixin):
             fw_query = context.session.query(
                 Firewall).with_lockmode('update')
             firewall_db = fw_query.filter_by(id=id).one()
+            if firewall_db.service_context_id is not None:
+                self._delete_service_context(
+                    context, firewall_db.service_context_id)
             # Note: Plugin should ensure that it's okay to delete if the
             # firewall is active
             context.session.delete(firewall_db)

@@ -46,16 +46,18 @@ class FirewallExtensionTestCase(test_api_v2_extension.ExtensionTestCase):
             constants.FIREWALL, firewall.RESOURCE_ATTRIBUTE_MAP,
             firewall.Firewall, 'fw', plural_mappings=plural_mappings)
 
-    def test_create_firewall(self):
+    def _test_create_firewall(self, svc_ctxt=None):
         fw_id = _uuid()
         data = {'firewall': {'description': 'descr_firewall1',
                              'name': 'firewall1',
                              'admin_state_up': True,
                              'firewall_policy_id': _uuid(),
+                             'service_context': svc_ctxt,
                              'shared': False,
                              'tenant_id': _uuid()}}
         return_value = copy.copy(data['firewall'])
         return_value.update({'id': fw_id})
+        return_value.update({'service_context': None})
         # since 'shared' is hidden
         del return_value['shared']
 
@@ -70,6 +72,25 @@ class FirewallExtensionTestCase(test_api_v2_extension.ExtensionTestCase):
         res = self.deserialize(res)
         self.assertIn('firewall', res)
         self.assertEqual(res['firewall'], return_value)
+
+    def test_create_firewall(self):
+        self._test_create_firewall()
+
+    def test_create_firewall_with_router_svc_ctxt(self):
+        svc_ctxt = {"routers": ["router1", "router2"]}
+        self._test_create_firewall(svc_ctxt)
+
+    def test_create_firewall_with_network_svc_ctxt(self):
+        svc_ctxt = {"networks": ["network1", "network2"]}
+        self._test_create_firewall(svc_ctxt)
+
+    def test_create_firewall_with_port_svc_ctxt(self):
+        svc_ctxt = {"ports": ["port1", "port2"]}
+        self._test_create_firewall(svc_ctxt)
+
+    def test_create_firewall_with_subnet_svc_ctxt(self):
+        svc_ctxt = {"subnets": ["subnet1", "subnet2"]}
+        self._test_create_firewall(svc_ctxt)
 
     def test_firewall_list(self):
         fw_id = _uuid()

@@ -26,12 +26,15 @@ from neutron.api import extensions as api_ext
 from neutron.common import config
 from neutron import context
 from neutron.db.firewall import firewall_db as fdb
+from neutron.db import l3_agentschedulers_db
 import neutron.extensions
 from neutron.extensions import firewall
 from neutron.openstack.common import importutils
 from neutron.openstack.common import uuidutils
 from neutron.plugins.common import constants
+from neutron.scheduler import l3_agent_scheduler
 from neutron.tests.unit import test_db_plugin
+from neutron.tests.unit import test_l3_plugin
 
 
 LOG = logging.getLogger(__name__)
@@ -53,6 +56,13 @@ ENABLED = True
 ADMIN_STATE_UP = True
 
 
+class TestFwaasCorePlugin(test_l3_plugin.TestL3NatIntPlugin,
+                          l3_agentschedulers_db.L3AgentSchedulerDbMixin):
+    def __init__(self, configfile=None):
+        super(TestFwaasCorePlugin, self).__init__()
+        self.router_scheduler = l3_agent_scheduler.ChanceScheduler()
+
+
 class FirewallPluginDbTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
     resource_prefix_map = dict(
         (k, constants.COMMON_PREFIXES[constants.FIREWALL])
@@ -65,17 +75,25 @@ class FirewallPluginDbTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
         service_plugins = {'fw_plugin_name': fw_plugin}
 
         fdb.Firewall_db_mixin.supported_extension_aliases = ["fwaas"]
-        super(FirewallPluginDbTestCase, self).setUp(
-            ext_mgr=ext_mgr,
-            service_plugins=service_plugins
-        )
+        if core_plugin:
+            super(FirewallPluginDbTestCase, self).setUp(
+                core_plugin,
+                ext_mgr=ext_mgr,
+                service_plugins=service_plugins)
+        else:
+            super(FirewallPluginDbTestCase, self).setUp(
+                ext_mgr=ext_mgr,
+                service_plugins=service_plugins)
 
         if not ext_mgr:
             self.plugin = importutils.import_object(fw_plugin)
+            plugins = {constants.FIREWALL: self.plugin}
+            if core_plugin:
+                plugins[constants.CORE] = importutils.import_object(
+                    core_plugin)
             ext_mgr = api_ext.PluginAwareExtensionManager(
                 extensions_path,
-                {constants.FIREWALL: self.plugin}
-            )
+                plugins)
             app = config.load_paste_app('extensions_test_app')
             self.ext_api = api_ext.ExtensionMiddleware(app, ext_mgr=ext_mgr)
 
@@ -228,7 +246,9 @@ class FirewallPluginDbTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
                              'firewall_policy_id': firewall_policy_id,
                              'admin_state_up': admin_state_up,
                              'tenant_id': self._tenant_id}}
-
+        if ('service_context' in kwargs and
+            kwargs['service_context'] is not None):
+            data['firewall']['service_context'] = kwargs['service_context']
         firewall_req = self.new_create_request('firewalls', data, fmt)
         firewall_res = firewall_req.get_response(self.ext_api)
         if expected_res_status:
@@ -288,7 +308,17 @@ class FirewallPluginDbTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
                 self.assertEqual(rule[k], r2[k])
 
 
-class TestFirewallDBPlugin(FirewallPluginDbTestCase):
+class TestFirewallDBPlugin(test_l3_plugin.L3NatTestCaseMixin,
+                           FirewallPluginDbTestCase):
+
+    def setUp(self, core_plugin=None, fw_plugin=None,
+              ext_mgr=None):
+        plugin_str = ('neutron.tests.unit.db.firewall.'
+                      'test_db_firewall.TestFwaasCorePlugin')
+        super(TestFirewallDBPlugin, self).setUp(
+            core_plugin=plugin_str,
+            fw_plugin=fw_plugin,
+            ext_mgr=ext_mgr)
 
     def test_create_firewall_policy(self):
         name = "firewall_policy1"
@@ -738,6 +768,79 @@ class TestFirewallDBPlugin(FirewallPluginDbTestCase):
                                ADMIN_STATE_UP) as firewall:
                 for k, v in attrs.iteritems():
                     self.assertEqual(firewall['firewall'][k], v)
+
+    def _test_create_firewall_with_svc_ctxt(self, svc_ctxt):
+        name = "firewall1"
+        attrs = self._get_test_firewall_attrs(name)
+        with self.firewall_policy(no_delete=True) as fwp:
+            fwp_id = fwp['firewall_policy']['id']
+            attrs['firewall_policy_id'] = fwp_id
+            attrs['service_context'] = svc_ctxt
+            with self.firewall(name=name,
+                               firewall_policy_id=fwp_id,
+                               service_context=svc_ctxt,
+                               admin_state_up=
+                               ADMIN_STATE_UP) as firewall:
+                for k, v in attrs.iteritems():
+                    self.assertEqual(firewall['firewall'][k], v)
+
+    def test_create_firewall_with_router_ctxt(self):
+        with self.router(tenant_id=self._tenant_id) as router:
+            router_list = [router['router']['id']]
+            svc_ctxt = {"networks": [],
+                        "ports": [],
+                        "routers": router_list,
+                        "subnets": []}
+            self._test_create_firewall_with_svc_ctxt(svc_ctxt)
+
+    def test_create_firewall_with_network_ctxt(self):
+        with self.network(tenant_id=self._tenant_id) as network:
+            network_list = [network['network']['id']]
+            svc_ctxt = {"networks": network_list,
+                        "ports": [],
+                        "routers": [],
+                        "subnets": []}
+            self._test_create_firewall_with_svc_ctxt(svc_ctxt)
+
+    def test_create_firewall_with_port_ctxt(self):
+        with self.port(tenant_id=self._tenant_id) as port:
+            port_list = [port['port']['id']]
+            svc_ctxt = {"networks": [],
+                        "ports": port_list,
+                        "routers": [],
+                        "subnets": []}
+            self._test_create_firewall_with_svc_ctxt(svc_ctxt)
+
+    def test_create_firewall_with_subnet_ctxt(self):
+        with self.subnet() as subnet:
+            subnet_list = [subnet['subnet']['id']]
+            svc_ctxt = {"networks": [],
+                        "ports": [],
+                        "routers": [],
+                        "subnets": subnet_list}
+            self._test_create_firewall_with_svc_ctxt(svc_ctxt)
+
+    def test_delete_router_in_use_by_router_ctxt(self):
+        """Test delete router in use by router context."""
+        name = "firewall1"
+        attrs = self._get_test_firewall_attrs(name)
+        with self.router(tenant_id=self._tenant_id) as router:
+            router_list = [router['router']['id']]
+            svc_ctxt = {"networks": [],
+                        "ports": [],
+                        "routers": router_list,
+                        "subnets": []}
+            with self.firewall_policy(no_delete=True) as fwp:
+                fwp_id = fwp['firewall_policy']['id']
+                attrs['firewall_policy_id'] = fwp_id
+                attrs['service_context'] = svc_ctxt
+                with self.firewall(name=name,
+                                   firewall_policy_id=fwp_id,
+                                   service_context=svc_ctxt,
+                                   admin_state_up=
+                                   ADMIN_STATE_UP):
+                    self._delete('routers', router['router']['id'],
+                                 expected_code=webob.exc.HTTPConflict.code)
 
     def test_show_firewall(self):
         name = "firewall1"

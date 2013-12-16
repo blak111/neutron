@@ -236,6 +236,11 @@ class L3_NAT_db_mixin(l3.RouterPluginBase):
             if vpnservice:
                 vpnservice.check_router_in_use(context, id)
 
+            fwservice = manager.NeutronManager.get_service_plugins().get(
+                constants.FIREWALL)
+            if fwservice:
+                fwservice.check_resource_in_use(context, id, 'router')
+
             # delete any gw port
             device_filter = {'device_id': [id],
                              'device_owner': [DEVICE_OWNER_ROUTER_GW]}

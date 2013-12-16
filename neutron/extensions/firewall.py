@@ -277,6 +277,12 @@ RESOURCE_ATTRIBUTE_MAP = {
         'firewall_policy_id': {'allow_post': True, 'allow_put': True,
                                'validate': {'type:uuid_or_none': None},
                                'is_visible': True},
+        'service_context': {'allow_post': True, 'allow_put': True,
+                            'is_visible': True, 'default': None,
+                            'validate': {'type:service_context': ["routers",
+                                                                  "networks",
+                                                                  "ports",
+                                                                  "subnets"]}}
     },
 }
 

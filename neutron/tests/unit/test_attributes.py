@@ -18,6 +18,7 @@
 import testtools
 
 from neutron.api.v2 import attributes
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.tests import base
 
@@ -659,6 +660,52 @@ class TestAttributes(base.BaseTestCase):
         for value in (0, 1, '2', True, False):
             msg = attributes._validate_non_negative(value)
             self.assertIsNone(msg)
+
+    def test_validate_service_context(self):
+
+        # check valid service contexts
+        service_ctxt1 = {"routers": ['e5069610-744b-42a7-8bd8-ceac1a229cd4',
+                                     '12345678123456781234567812345678']}
+        service_ctxt2 = {"networks": ['e5069610-744b-42a7-8bd8-ceac1a229cd4'],
+                         "subnets": ['e5069610-744b-42a7-8bd8-ceac1a229cd4'],
+                         "ports": ['e5069610-744b-42a7-8bd8-ceac1a229cd4'],
+                         "routers": ['e5069610-744b-42a7-8bd8-ceac1a229cd4']}
+        service_ctxts = [None,
+                         service_ctxt1,
+                         service_ctxt2]
+
+        for service_ctxt in service_ctxts:
+            msg = attributes._validate_service_context(service_ctxt,
+                                                       None)
+            self.assertIsNone(msg)
+
+        # check service context that is not a dictionary
+        service_ctxt = ['e5069610-744b-42a7-8bd8-ceac1a229cd4']
+        msg = attributes._validate_service_context(service_ctxt,
+                                                   None)
+        error = _("%s is not a valid service context, "
+                  "should be a dictionary") % service_ctxt
+        self.assertEqual(msg, error)
+
+        # check service context with value that is not a list
+        router = 'e5069610-744b-42a7-8bd8-ceac1a229cd4'
+        service_ctxt = {"routers": router}
+        msg = attributes._validate_service_context(service_ctxt,
+                                                   None)
+        error = _("'%s' is not a list") % router
+        self.assertEqual(msg, error)
+
+        # check service context with unsupported insertion point
+        service_ctxt = {"lbaas": ['e5069610-744b-42a7-8bd8-ceac1a229cd4']}
+        msg = attributes._validate_service_context(service_ctxt,
+                                                   None)
+        allowed_insertions = set(constants.SI_ALLOWED_RESOURCE_TYPES)
+        error = (_("Not a valid Service context: "
+                   "Allowed keys: %(allowed_keys)s "
+                   "Provided keys: %(provided_keys)s") %
+                 {'allowed_keys': allowed_insertions,
+                  'provided_keys': set(["lbaas"])})
+        self.assertEqual(msg, error)
 
 
 class TestConvertToBoolean(base.BaseTestCase):

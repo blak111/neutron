@@ -109,8 +109,13 @@ class FWaaSL3AgentRpcCallback(api.FWaaSAgentRpcCallbackMixin):
         """Invoke driver method for plugin API and provide status back."""
         LOG.debug(_("%(func_name)s from agent for fw: %(fwid)s"),
                   {'func_name': func_name, 'fwid': fw['id']})
+        target_routers = None
+        if (fw.get('service_context') and
+            fw['service_context'].get('routers')):
+            target_routers = fw['service_context']['routers']
         try:
-            routers = self.plugin_rpc.get_routers(context)
+            routers = self.plugin_rpc.get_routers(context,
+                                                  router_ids=target_routers)
             router_info_list = self._get_router_info_list_for_tenant(
                 routers,
                 fw['tenant_id'])
@@ -159,6 +164,11 @@ class FWaaSL3AgentRpcCallback(api.FWaaSAgentRpcCallbackMixin):
         update method for all other status to (re)apply on driver which is
         Idempotent.
         """
+        if (fw.get('service_context') and
+            fw['service_context'].get('routers')):
+            target_routers = fw['service_context']['routers']
+            router_info_list = [ri for ri in router_info_list
+                                if ri.router['id'] in target_routers]
         if fw['status'] == constants.PENDING_DELETE:
             try:
                 self.fwaas_driver.delete_firewall(router_info_list, fw)

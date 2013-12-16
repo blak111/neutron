@@ -438,6 +438,33 @@ def _validate_non_negative(data, valid_values=None):
         return msg
 
 
+def _validate_service_context(data, key_specs=None):
+    # service_context must be None or dict
+    if data is None:
+        return
+    if not isinstance(data, dict):
+        msg = _("%s is not a valid service context, "
+                "should be a dictionary") % data
+        LOG.debug(msg)
+        return msg
+    for k, v in data.iteritems():
+        if not isinstance(v, list):
+            msg = _("'%s' is not a list") % v
+            LOG.debug(msg)
+            return msg
+
+    allowed_keys = set(constants.SI_ALLOWED_RESOURCE_TYPES)
+    provided_keys = set(data.keys())
+
+    if not provided_keys.issubset(allowed_keys):
+        msg = (_("Not a valid Service context: "
+                 "Allowed keys: %(allowed_keys)s "
+                 "Provided keys: %(provided_keys)s") %
+               {'allowed_keys': allowed_keys,
+                'provided_keys': provided_keys})
+        return msg
+
+
 def convert_to_boolean(data):
     if isinstance(data, basestring):
         val = data.lower()
@@ -549,7 +576,8 @@ validators = {'type:dict': _validate_dict,
               'type:uuid_or_none': _validate_uuid_or_none,
               'type:uuid_list': _validate_uuid_list,
               'type:values': _validate_values,
-              'type:boolean': _validate_boolean}
+              'type:boolean': _validate_boolean,
+              'type:service_context': _validate_service_context}
 
 # Define constants for base resource name
 NETWORK = 'network'
