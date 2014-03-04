@@ -283,7 +283,8 @@ class TestFirewallPluginBase(test_db_firewall.TestFirewallDBPlugin):
     def test_delete_firewall(self):
         ctx = context.get_admin_context()
         attrs = self._get_test_firewall_attrs()
-
+        # stop the AgentRPC patch for this one to test pending states
+        self.agentapi_delf_p.stop()
         with self.firewall_policy(no_delete=True) as fwp:
             fwp_id = fwp['firewall_policy']['id']
             attrs['firewall_policy_id'] = fwp_id
@@ -299,6 +300,7 @@ class TestFirewallPluginBase(test_db_firewall.TestFirewallDBPlugin):
                 fw_db = self.plugin._get_firewall(ctx, fw_id)
                 for k, v in attrs.iteritems():
                     self.assertEqual(fw_db[k], v)
+        self.agentapi_delf_p.start()
 
     def test_delete_firewall_after_agent_delete(self):
         ctx = context.get_admin_context()
@@ -311,7 +313,6 @@ class TestFirewallPluginBase(test_db_firewall.TestFirewallDBPlugin):
                     req = self.new_delete_request('firewalls', fw_id)
                     res = req.get_response(self.ext_api)
                     self.assertEqual(res.status_int, 204)
-                    self.plugin.callbacks.firewall_deleted(ctx, fw_id)
                     self.assertRaises(firewall.FirewallNotFound,
                                       self.plugin.get_firewall,
                                       ctx, fw_id)

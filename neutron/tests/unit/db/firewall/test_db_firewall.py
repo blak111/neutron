@@ -20,6 +20,7 @@
 import contextlib
 import logging
 
+import mock
 import webob.exc
 
 from neutron.api import extensions as api_ext
@@ -29,10 +30,12 @@ from neutron.db.firewall import firewall_db as fdb
 from neutron.db import l3_agentschedulers_db
 import neutron.extensions
 from neutron.extensions import firewall
+from neutron.manager import NeutronManager
 from neutron.openstack.common import importutils
 from neutron.openstack.common import uuidutils
 from neutron.plugins.common import constants
 from neutron.scheduler import l3_agent_scheduler
+from neutron.services.firewall.fwaas_plugin import FirewallCallbacks
 from neutron.tests.unit import test_db_plugin
 from neutron.tests.unit import test_l3_plugin
 
@@ -41,6 +44,8 @@ LOG = logging.getLogger(__name__)
 DB_FW_PLUGIN_KLASS = (
     "neutron.db.firewall.firewall_db.Firewall_db_mixin"
 )
+FWAAS_PLUGIN = 'neutron.services.firewall.fwaas_plugin'
+DELETEFW_PATH = FWAAS_PLUGIN + '.FirewallAgentApi.delete_firewall'
 extensions_path = ':'.join(neutron.extensions.__path__)
 DESCRIPTION = 'default description'
 SHARED = True
@@ -63,6 +68,20 @@ class TestFwaasCorePlugin(test_l3_plugin.TestL3NatIntPlugin,
         self.router_scheduler = l3_agent_scheduler.ChanceScheduler()
 
 
+class FakeAgentApi(FirewallCallbacks):
+    """
+    Fake glue layer that patches plugin plugin-to-agent RPC calls directly
+    into the expected resulting agent-to-plugin RPC calls.
+    """
+
+    def __init__(self):
+        pass
+
+    def delete_firewall(self, context, firewall):
+        self.plugin = NeutronManager.get_service_plugins()['FIREWALL']
+        self.firewall_deleted(context, firewall['id'])
+
+
 class FirewallPluginDbTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
     resource_prefix_map = dict(
         (k, constants.COMMON_PREFIXES[constants.FIREWALL])
@@ -70,6 +89,10 @@ class FirewallPluginDbTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
     )
 
     def setUp(self, core_plugin=None, fw_plugin=None, ext_mgr=None):
+        self.agentapi_delf_p = mock.patch(DELETEFW_PATH, create=True,
+                                          new=FakeAgentApi().delete_firewall)
+        self.agentapi_delf_p.start()
+        self.addCleanup(mock.patch.stopall)
         if not fw_plugin:
             fw_plugin = DB_FW_PLUGIN_KLASS
         service_plugins = {'fw_plugin_name': fw_plugin}
@@ -830,7 +853,7 @@ class TestFirewallDBPlugin(test_l3_plugin.L3NatTestCaseMixin,
                         "ports": [],
                         "routers": router_list,
                         "subnets": []}
-            with self.firewall_policy(no_delete=True) as fwp:
+            with self.firewall_policy() as fwp:
                 fwp_id = fwp['firewall_policy']['id']
                 attrs['firewall_policy_id'] = fwp_id
                 attrs['service_context'] = svc_ctxt
