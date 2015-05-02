@@ -19,6 +19,7 @@ import os
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
+import time
 
 from neutron.agent.common import utils
 from neutron.common import exceptions
@@ -36,6 +37,11 @@ OPTS = [
 LOOPBACK_DEVNAME = 'lo'
 
 SYS_NET_PATH = '/sys/class/net'
+
+
+class AddressNotReady(exceptions.NeutronException):
+    message = _("Failure waiting for address %(address)s to "
+                "become ready: %(reason)s")
 
 
 class SubProcessBase(object):
@@ -383,8 +389,37 @@ class IpAddrCommand(IpDeviceCommandBase):
 
             retval.append(dict(cidr=parts[1],
                                scope=scope,
-                               dynamic=('dynamic' == parts[-1])))
+                               dynamic=('dynamic' == parts[-1]),
+                               tentative=('tentative' in line),
+                               dadfailed=('dadfailed' == parts[-1])))
         return retval
+
+    def wait_until_address_ready(self, cidr, wait_time=30):
+        """Wait until an address is no longer marked 'tentative'
+
+        raises AddressNotReady if times out or if CIDR not present on interface
+        """
+        clock_start = os.times()[4]
+        while os.times()[4] - clock_start < wait_time:
+            for addr_info in self.list(to=cidr):
+                if cidr == addr_info['cidr']:
+                    if not addr_info['tentative']:
+                        return
+                    if addr_info['dadfailed']:
+                        raise AddressNotReady(
+                            address=cidr,
+                            reason=_LE('Duplicate adddress detected'))
+                    break
+            else:
+                # NOTE(kevinbenton): this is the fabled 'else' clause of a for
+                # loop. This is hit if nothing in the loop breaks.
+                raise AddressNotReady(
+                    address=cidr, reason=_LE('CIDR not present on interface'))
+            time.sleep(0.20)
+        raise AddressNotReady(
+            address=cidr,
+            reason=_LE("Exceeded %s second wait time waiting for "
+                       "address to leave the tentative state.") % wait_time)
 
 
 class IpRouteCommand(IpDeviceCommandBase):
